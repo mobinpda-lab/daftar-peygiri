@@ -8,7 +8,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Create project files
+      - name: Create Android project
         run: |
           mkdir -p app/src/main/java/com/daftar/peygiri
           mkdir -p app/src/main/res/values
@@ -21,7 +21,6 @@ jobs:
                   gradlePluginPortal()
               }
           }
-
           dependencyResolutionManagement {
               repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
               repositories {
@@ -29,7 +28,6 @@ jobs:
                   mavenCentral()
               }
           }
-
           rootProject.name = "DaftarPeygiri"
           include(":app")
           EOF
@@ -53,8 +51,8 @@ jobs:
                   applicationId 'com.daftar.peygiri'
                   minSdk 23
                   targetSdk 35
-                  versionCode 1
-                  versionName '1.0'
+                  versionCode 2
+                  versionName '2.0'
               }
           }
           EOF
@@ -70,8 +68,8 @@ jobs:
               <style name="AppTheme" parent="android:style/Theme.Material.Light.NoActionBar">
                   <item name="android:fontFamily">sans</item>
                   <item name="android:colorAccent">#1565C0</item>
-                  <item name="android:navigationBarColor">#FFFFFF</item>
                   <item name="android:statusBarColor">#1565C0</item>
+                  <item name="android:navigationBarColor">#FFFFFF</item>
                   <item name="android:windowLightStatusBar">false</item>
               </style>
           </resources>
@@ -79,6 +77,9 @@ jobs:
 
           cat > app/src/main/AndroidManifest.xml <<'EOF'
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+              <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+
               <application
                   android:theme="@style/AppTheme"
                   android:label="@string/app_name"
@@ -96,6 +97,7 @@ jobs:
                       </intent-filter>
 
                   </activity>
+
               </application>
           </manifest>
           EOF
@@ -103,17 +105,19 @@ jobs:
           cat > app/src/main/java/com/daftar/peygiri/MainActivity.java <<'EOF'
           package com.daftar.peygiri;
 
-          import android.app.Activity;
-          import android.os.Bundle;
-          import android.content.Context;
-          import android.database.sqlite.SQLiteDatabase;
-          import android.database.sqlite.SQLiteOpenHelper;
-          import android.database.Cursor;
-          import android.content.ContentValues;
-          import android.graphics.Color;
-          import android.view.Gravity;
-          import android.view.View;
+          import android.app.*;
+          import android.os.*;
+          import android.content.*;
+          import android.database.*;
+          import android.database.sqlite.*;
+          import android.graphics.*;
+          import android.graphics.pdf.PdfDocument;
+          import android.net.Uri;
+          import android.provider.Settings;
+          import android.view.*;
           import android.widget.*;
+          import java.io.*;
+          import java.text.*;
           import java.util.*;
 
           public class MainActivity extends Activity {
@@ -121,6 +125,8 @@ jobs:
               LinearLayout root;
               DB db;
               int BLUE = Color.rgb(21,101,192);
+              int GREEN = Color.rgb(46,125,50);
+              int RED = Color.rgb(198,40,40);
 
               @Override
               public void onCreate(Bundle b) {
@@ -132,36 +138,36 @@ jobs:
               TextView header(String s) {
                   TextView t = new TextView(this);
                   t.setText(s);
-                  t.setTextColor(Color.WHITE);
                   t.setTextSize(21);
+                  t.setTextColor(Color.WHITE);
                   t.setGravity(Gravity.CENTER);
-                  t.setPadding(10,24,10,24);
+                  t.setPadding(12,22,12,22);
                   t.setBackgroundColor(BLUE);
                   return t;
               }
 
-              TextView text(String s) {
+              TextView txt(String s) {
                   TextView t = new TextView(this);
                   t.setText(s);
-                  t.setTextSize(17);
+                  t.setTextSize(16);
                   t.setTextColor(Color.DKGRAY);
-                  t.setPadding(18,14,18,14);
+                  t.setPadding(16,12,16,12);
                   return t;
+              }
+
+              EditText edit(String hint) {
+                  EditText e = new EditText(this);
+                  e.setHint(hint);
+                  e.setTextSize(16);
+                  e.setPadding(16,8,16,8);
+                  return e;
               }
 
               Button btn(String s) {
                   Button b = new Button(this);
                   b.setText(s);
-                  b.setTextSize(16);
+                  b.setTextSize(15);
                   return b;
-              }
-
-              EditText input(String hint) {
-                  EditText e = new EditText(this);
-                  e.setHint(hint);
-                  e.setTextSize(16);
-                  e.setPadding(18,10,18,10);
-                  return e;
               }
 
               void base() {
@@ -171,285 +177,823 @@ jobs:
                   setContentView(root);
               }
 
+              String nowDate() {
+                  Calendar c = Calendar.getInstance();
+                  int[] j = Jalali.toJalali(
+                          c.get(Calendar.YEAR),
+                          c.get(Calendar.MONTH)+1,
+                          c.get(Calendar.DAY_OF_MONTH));
+                  return String.format(Locale.US,"%04d/%02d/%02d",
+                          j[0],j[1],j[2]);
+              }
+
+              String nowTime() {
+                  return new SimpleDateFormat("HH:mm",Locale.US)
+                          .format(new Date());
+              }
+
               void home() {
                   base();
-                  root.addView(header("دفتر پیگیری امور"));
 
-                  Button today = btn("🔴  پیگیری امروز");
-                  Button late = btn("⚠️  عقب‌افتاده");
-                  Button future = btn("🔵  پیگیری‌های آینده");
-                  Button all = btn("📋  همه موضوعات");
-                  Button add = btn("＋  ثبت موضوع جدید");
+                  LinearLayout top = new LinearLayout(this);
+                  top.setOrientation(LinearLayout.HORIZONTAL);
 
-                  root.addView(today);
-                  root.addView(late);
-                  root.addView(future);
-                  root.addView(all);
-                  root.addView(add);
+                  TextView title = header("دفتر پیگیری امور");
+                  top.addView(title,new LinearLayout.LayoutParams(0,-2,1));
 
-                  root.addView(text("امروز: " + PersianDate.today()));
+                  Button menu = btn("☰");
+                  top.addView(menu,new LinearLayout.LayoutParams(90,-2));
 
-                  today.setOnClickListener(v -> list("today"));
-                  late.setOnClickListener(v -> list("late"));
-                  future.setOnClickListener(v -> list("future"));
-                  all.setOnClickListener(v -> list("all"));
-                  add.setOnClickListener(v -> addSubject());
-              }
+                  root.addView(top);
 
-              void addSubject() {
-                  base();
-                  root.addView(header("ثبت موضوع جدید"));
+                  EditText search = edit("🔍 جستجو در کارها و پیگیری‌ها");
+                  root.addView(search);
 
-                  EditText name = input("عنوان موضوع");
-                  EditText number = input("شماره / کد پیگیری");
-                  EditText desc = input("توضیحات");
+                  root.addView(txt("📋 کارهای فعال"));
 
-                  desc.setMinLines(3);
-
-                  root.addView(name);
-                  root.addView(number);
-                  root.addView(desc);
-
-                  Button save = btn("ذخیره موضوع");
-                  Button back = btn("بازگشت");
-
-                  root.addView(save);
-                  root.addView(back);
-
-                  save.setOnClickListener(v -> {
-                      String n = name.getText().toString().trim();
-
-                      if(n.isEmpty()) {
-                          Toast.makeText(this,"عنوان موضوع را وارد کنید",Toast.LENGTH_SHORT).show();
-                          return;
-                      }
-
-                      long id = db.addSubject(
-                              n,
-                              number.getText().toString(),
-                              desc.getText().toString()
-                      );
-
-                      showSubject(id);
-                  });
-
-                  back.setOnClickListener(v -> home());
-              }
-
-              void list(String type) {
-                  base();
-
-                  String title =
-                          type.equals("today") ? "پیگیری امروز" :
-                          type.equals("late") ? "پیگیری‌های عقب‌افتاده" :
-                          type.equals("future") ? "پیگیری‌های آینده" :
-                          "همه موضوعات";
-
-                  root.addView(header(title));
-
-                  Cursor c = db.subjects();
-                  boolean found = false;
+                  Cursor c = db.tasks(false);
+                  boolean any=false;
 
                   while(c.moveToNext()) {
-                      long id = c.getLong(0);
-                      String name = c.getString(1);
-                      String next = c.getString(4);
-
-                      if(type.equals("today") && !next.equals(PersianDate.today()))
-                          continue;
-
-                      if(type.equals("late") &&
-                              (next.isEmpty() || next.compareTo(PersianDate.today()) >= 0))
-                          continue;
-
-                      if(type.equals("future") &&
-                              (next.isEmpty() || next.compareTo(PersianDate.today()) <= 0))
-                          continue;
-
-                      found = true;
-
-                      Button b = btn(name +
-                              (next.isEmpty() ? "" : "\nپیگیری بعدی: " + next));
-
-                      root.addView(b);
-                      b.setOnClickListener(v -> showSubject(id));
+                      any=true;
+                      addTaskCard(c);
                   }
 
                   c.close();
 
-                  if(!found)
-                      root.addView(text("موردی پیدا نشد."));
+                  if(!any)
+                      root.addView(txt("کاری برای نمایش وجود ندارد."));
 
-                  Button add = btn("＋ ثبت موضوع جدید");
-                  Button back = btn("بازگشت");
-
+                  Button add = btn("＋ کار جدید");
                   root.addView(add);
-                  root.addView(back);
 
-                  add.setOnClickListener(v -> addSubject());
-                  back.setOnClickListener(v -> home());
+                  add.setOnClickListener(v -> addTask());
+
+                  search.setOnEditorActionListener((v,a,e) -> {
+                      search(search.getText().toString());
+                      return true;
+                  });
+
+                  menu.setOnClickListener(v -> menu());
               }
 
-              void showSubject(long id) {
+              void addTaskCard(Cursor c) {
+                  long id=c.getLong(0);
+                  String title=c.getString(1);
+                  String category=c.getString(2);
+                  String tags=c.getString(3);
+                  String due=c.getString(5);
+                  String last=db.lastFollow(id);
+
+                  LinearLayout box=new LinearLayout(this);
+                  box.setOrientation(LinearLayout.VERTICAL);
+                  box.setPadding(10,10,10,10);
+
+                  CheckBox check=new CheckBox(this);
+                  check.setText(title);
+                  check.setTextSize(17);
+                  box.addView(check);
+
+                  box.addView(txt(
+                          "📁 "+category+
+                          "\n🏷 "+tags+
+                          "\n⏰ سررسید: "+due+
+                          "\n"+lastTimeText(last)));
+
+                  root.addView(box);
+
+                  check.setOnCheckedChangeListener((b,checked)->{
+                      if(checked) {
+                          db.archive(id,nowDate(),nowTime());
+                          Toast.makeText(this,"کار به بایگانی منتقل شد",
+                                  Toast.LENGTH_SHORT).show();
+                          home();
+                      }
+                  });
+
+                  box.setOnClickListener(v -> taskPage(id));
+              }
+
+              String lastTimeText(String last) {
+                  if(last==null || last.isEmpty())
+                      return "⏱ هنوز پیگیری ثبت نشده است.";
+
+                  try {
+                      Date d=new SimpleDateFormat(
+                              "yyyy/MM/dd HH:mm",
+                              Locale.US).parse(last);
+
+                      long diff=System.currentTimeMillis()-d.getTime();
+
+                      if(diff<0) diff=0;
+
+                      long minutes=diff/60000;
+                      long hours=minutes/60;
+                      long days=hours/24;
+
+                      minutes%=60;
+                      hours%=24;
+
+                      if(days>0)
+                          return "⏱ آخرین پیگیری: "+days+
+                                  " روز و "+hours+" ساعت قبل";
+
+                      if(hours>0)
+                          return "⏱ آخرین پیگیری: "+hours+
+                                  " ساعت و "+minutes+" دقیقه قبل";
+
+                      return "⏱ آخرین پیگیری: "+minutes+" دقیقه قبل";
+
+                  } catch(Exception e) {
+                      return "⏱ آخرین پیگیری: "+last;
+                  }
+              }
+
+              void addTask() {
+                  base();
+                  root.addView(header("ثبت کار جدید"));
+
+                  EditText title=edit("عنوان کار");
+                  EditText desc=edit("توضیحات");
+                  EditText category=edit("دسته‌بندی");
+                  EditText tags=edit("تگ‌ها - با فاصله جدا کنید");
+                  EditText due=edit("سررسید - مثال 1405/06/01 10:00");
+
+                  root.addView(txt("تاریخ و ساعت ثبت: "+
+                          nowDate()+" "+nowTime()));
+                  root.addView(title);
+                  root.addView(desc);
+                  root.addView(category);
+                  root.addView(tags);
+                  root.addView(due);
+
+                  CheckBox reminder=new CheckBox(this);
+                  reminder.setText("🔔 یادآور فعال شود");
+                  root.addView(reminder);
+
+                  Button save=btn("ذخیره");
+                  Button back=btn("بازگشت");
+
+                  root.addView(save);
+                  root.addView(back);
+
+                  save.setOnClickListener(v->{
+                      if(title.getText().toString().trim().isEmpty()) {
+                          Toast.makeText(this,"عنوان را وارد کنید",
+                                  Toast.LENGTH_SHORT).show();
+                          return;
+                      }
+
+                      long id=db.addTask(
+                              title.getText().toString(),
+                              desc.getText().toString(),
+                              category.getText().toString(),
+                              tags.getText().toString(),
+                              nowDate()+" "+nowTime(),
+                              due.getText().toString());
+
+                      if(reminder.isChecked() && !due.getText().toString().isEmpty())
+                          reminder(id,due.getText().toString(),
+                                  title.getText().toString());
+
+                      taskPage(id);
+                  });
+
+                  back.setOnClickListener(v->home());
+              }
+
+              void taskPage(long id) {
                   base();
 
-                  Cursor c = db.subject(id);
+                  Cursor c=db.task(id);
 
                   if(!c.moveToFirst()) {
                       home();
                       return;
                   }
 
-                  String name = c.getString(1);
-                  String number = c.getString(2);
-                  String desc = c.getString(3);
-                  String next = c.getString(4);
+                  String title=c.getString(1);
+                  String desc=c.getString(2);
+                  String category=c.getString(3);
+                  String tags=c.getString(4);
+                  String created=c.getString(5);
+                  String due=c.getString(6);
 
                   c.close();
 
-                  root.addView(header(name));
-                  root.addView(text("شماره: " + number));
-                  root.addView(text("توضیحات: " + desc));
-                  root.addView(text("پیگیری بعدی: " +
-                          (next.isEmpty() ? "تعیین نشده" : next)));
+                  root.addView(header(title));
 
-                  root.addView(text("──────── سوابق پیگیری ────────"));
+                  root.addView(txt(
+                          "دسته: "+category+
+                          "\nتگ: "+tags+
+                          "\nثبت: "+created+
+                          "\nسررسید: "+due+
+                          "\n"+lastTimeText(db.lastFollow(id))));
 
-                  Cursor h = db.history(id);
+                  root.addView(txt("توضیحات:\n"+desc));
+
+                  root.addView(txt("──── سوابق پیگیری ────"));
+
+                  Cursor h=db.history(id);
 
                   while(h.moveToNext()) {
-                      String date = h.getString(1);
-                      String detail = h.getString(2);
-                      String result = h.getString(3);
-
-                      root.addView(text(
-                              "📅 " + date +
-                              "\n" + detail +
-                              "\nنتیجه: " + result
+                      root.addView(txt(
+                              "📅 "+h.getString(1)+
+                              "\n📝 "+h.getString(2)+
+                              "\nنتیجه: "+h.getString(3)+
+                              "\nپیگیری بعدی: "+h.getString(4)
                       ));
                   }
 
                   h.close();
 
-                  Button follow = btn("＋ ثبت پیگیری");
-                  Button back = btn("بازگشت");
+                  Button follow=btn("＋ ثبت پیگیری");
+                  Button pdf=btn("📄 خروجی PDF");
+                  Button share=btn("📤 اشتراک‌گذاری");
+                  Button back=btn("بازگشت");
 
                   root.addView(follow);
+                  root.addView(pdf);
+                  root.addView(share);
                   root.addView(back);
 
-                  follow.setOnClickListener(v -> addFollow(id));
-                  back.setOnClickListener(v -> home());
+                  follow.setOnClickListener(v->addFollow(id));
+                  pdf.setOnClickListener(v->pdfTask(id));
+                  share.setOnClickListener(v->shareTask(id));
+                  back.setOnClickListener(v->home());
               }
 
               void addFollow(long id) {
                   base();
                   root.addView(header("ثبت پیگیری"));
 
-                  EditText date = input(
-                          "تاریخ پیگیری - مثال: " + PersianDate.today()
-                  );
+                  EditText date=edit("تاریخ");
+                  EditText time=edit("ساعت");
+                  EditText detail=edit("شرح پیگیری - اختیاری");
+                  EditText result=edit("نتیجه - اختیاری");
+                  EditText next=edit("پیگیری بعدی - اختیاری");
 
-                  EditText detail = input("شرح پیگیری");
-                  detail.setMinLines(3);
-
-                  EditText result = input("نتیجه");
-                  result.setMinLines(2);
-
-                  EditText next = input("تاریخ پیگیری بعدی - مثال: 1405/06/01");
+                  date.setText(nowDate());
+                  time.setText(nowTime());
 
                   root.addView(date);
+                  root.addView(time);
                   root.addView(detail);
                   root.addView(result);
                   root.addView(next);
 
-                  Button save = btn("ذخیره پیگیری");
-                  Button back = btn("بازگشت");
+                  CheckBox rem=new CheckBox(this);
+                  rem.setText("🔔 یادآور پیگیری بعدی");
+                  root.addView(rem);
+
+                  Button save=btn("ذخیره پیگیری");
+                  Button back=btn("بازگشت");
 
                   root.addView(save);
                   root.addView(back);
 
-                  save.setOnClickListener(v -> {
+                  save.setOnClickListener(v->{
 
-                      db.addHistory(
+                      String dt=date.getText().toString()+" "+
+                              time.getText().toString();
+
+                      db.addFollow(
                               id,
-                              date.getText().toString(),
+                              dt,
                               detail.getText().toString(),
                               result.getText().toString(),
-                              next.getText().toString()
-                      );
+                              next.getText().toString());
 
-                      Toast.makeText(
-                              this,
-                              "پیگیری ثبت شد",
-                              Toast.LENGTH_SHORT
-                      ).show();
+                      if(rem.isChecked() &&
+                              !next.getText().toString().isEmpty())
+                          reminder(id,next.getText().toString(),
+                                  "پیگیری: "+db.taskTitle(id));
 
-                      showSubject(id);
+                      taskPage(id);
                   });
 
-                  back.setOnClickListener(v -> showSubject(id));
+                  back.setOnClickListener(v->taskPage(id));
+              }
+
+              void menu() {
+                  final String[] items={
+                          "🏠 صفحه اصلی",
+                          "📋 کارهای فعال",
+                          "📦 بایگانی",
+                          "🗂 موضوعات",
+                          "🔴 پیگیری امروز",
+                          "⚠️ عقب‌افتاده",
+                          "🔵 آینده",
+                          "🔍 جستجو",
+                          "📄 گزارش‌ها",
+                          "💾 پشتیبان‌گیری",
+                          "📥 بازیابی",
+                          "⚙️ تنظیمات"
+                  };
+
+                  new AlertDialog.Builder(this)
+                          .setTitle("☰ منوی برنامه")
+                          .setItems(items,(d,w)->{
+
+                              if(w==0) home();
+                              else if(w==1) home();
+                              else if(w==2) archive();
+                              else if(w==7) searchPage();
+                              else if(w==9) backup();
+                              else if(w==10) restore();
+                              else if(w==11) settings();
+                              else if(w==8) reports();
+                          }).show();
+              }
+
+              void archive() {
+                  base();
+                  root.addView(header("📦 بایگانی کارها"));
+
+                  Cursor c=db.tasks(true);
+                  boolean any=false;
+
+                  while(c.moveToNext()) {
+                      any=true;
+                      long id=c.getLong(0);
+
+                      Button b=btn(
+                              "☑ "+c.getString(1)+
+                              "\nانجام شد: "+c.getString(7));
+
+                      root.addView(b);
+
+                      b.setOnClickListener(v->{
+                          db.unarchive(id);
+                          Toast.makeText(this,
+                                  "کار به حالت فعال بازگردانده شد",
+                                  Toast.LENGTH_SHORT).show();
+                          archive();
+                      });
+                  }
+
+                  c.close();
+
+                  if(!any) root.addView(txt("بایگانی خالی است."));
+
+                  Button back=btn("بازگشت");
+                  root.addView(back);
+                  back.setOnClickListener(v->home());
+              }
+
+              void searchPage() {
+                  base();
+                  root.addView(header("🔍 جستجو"));
+
+                  EditText q=edit("عبارت موردنظر");
+                  root.addView(q);
+
+                  Button go=btn("جستجو");
+                  root.addView(go);
+
+                  go.setOnClickListener(v->search(q.getText().toString()));
+
+                  Button back=btn("بازگشت");
+                  root.addView(back);
+                  back.setOnClickListener(v->home());
+              }
+
+              void search(String q) {
+                  if(q.trim().isEmpty()) {
+                      searchPage();
+                      return;
+                  }
+
+                  base();
+                  root.addView(header("نتایج جستجو"));
+
+                  Cursor c=db.search(q);
+
+                  while(c.moveToNext()) {
+                      long id=c.getLong(0);
+                      Button b=btn(c.getString(1));
+                      root.addView(b);
+                      b.setOnClickListener(v->taskPage(id));
+                  }
+
+                  c.close();
+
+                  Button back=btn("بازگشت");
+                  root.addView(back);
+                  back.setOnClickListener(v->home());
+              }
+
+              void shareTask(long id) {
+                  StringBuilder s=new StringBuilder();
+
+                  Cursor c=db.task(id);
+
+                  if(c.moveToFirst()) {
+                      s.append("دفتر پیگیری امور\n\n");
+                      s.append("کار: ").append(c.getString(1)).append("\n");
+                      s.append("دسته: ").append(c.getString(3)).append("\n");
+                      s.append("تگ: ").append(c.getString(4)).append("\n");
+                      s.append("سررسید: ").append(c.getString(6)).append("\n\n");
+                  }
+
+                  c.close();
+
+                  Cursor h=db.history(id);
+
+                  while(h.moveToNext()) {
+                      s.append("پیگیری: ")
+                              .append(h.getString(1))
+                              .append("\n");
+
+                      s.append(h.getString(2))
+                              .append("\n");
+
+                      s.append("نتیجه: ")
+                              .append(h.getString(3))
+                              .append("\n\n");
+                  }
+
+                  h.close();
+
+                  Intent i=new Intent(Intent.ACTION_SEND);
+                  i.setType("text/plain");
+                  i.putExtra(Intent.EXTRA_TEXT,s.toString());
+                  startActivity(Intent.createChooser(i,"اشتراک‌گذاری"));
+              }
+
+              void pdfTask(long id) {
+                  Cursor c=db.task(id);
+
+                  if(!c.moveToFirst()) return;
+
+                  String title=c.getString(1);
+
+                  PdfDocument doc=new PdfDocument();
+                  PdfDocument.PageInfo pi=
+                          new PdfDocument.PageInfo.Builder(
+                                  595,842,1).create();
+
+                  PdfDocument.Page page=doc.startPage(pi);
+                  Canvas canvas=page.getCanvas();
+                  Paint p=new Paint();
+
+                  p.setTextSize(18);
+                  canvas.drawText("Daftar Peygiri",40,50,p);
+
+                  p.setTextSize(15);
+                  canvas.drawText(title,40,90,p);
+
+                  int y=125;
+
+                  Cursor h=db.history(id);
+
+                  while(h.moveToNext()) {
+                      canvas.drawText(
+                              h.getString(1),
+                              40,y,p);
+
+                      y+=25;
+
+                      canvas.drawText(
+                              h.getString(2),
+                              40,y,p);
+
+                      y+=25;
+
+                      canvas.drawText(
+                              "نتیجه: "+h.getString(3),
+                              40,y,p);
+
+                      y+=35;
+
+                      if(y>790) break;
+                  }
+
+                  h.close();
+                  c.close();
+
+                  doc.finishPage(page);
+
+                  File f=new File(
+                          getExternalFilesDir(null),
+                          "DaftarPeygiri_"+id+".pdf");
+
+                  try {
+                      FileOutputStream out=new FileOutputStream(f);
+                      doc.writeTo(out);
+                      out.close();
+                      doc.close();
+
+                      Intent i=new Intent(Intent.ACTION_SEND);
+                      i.setType("application/pdf");
+                      i.putExtra(
+                              Intent.EXTRA_STREAM,
+                              Uri.fromFile(f));
+
+                      startActivity(
+                              Intent.createChooser(
+                                      i,"اشتراک PDF"));
+
+                  } catch(Exception e) {
+                      Toast.makeText(this,
+                              "خطا در ساخت PDF",
+                              Toast.LENGTH_SHORT).show();
+                  }
+              }
+
+              void reports() {
+                  new AlertDialog.Builder(this)
+                          .setTitle("گزارش‌ها")
+                          .setItems(new String[]{
+                                  "📄 PDF کارهای فعال",
+                                  "📄 PDF بایگانی"
+                          },(d,w)->{
+                              Toast.makeText(this,
+                                      "گزارش در نسخه بعدی تکمیل می‌شود",
+                                      Toast.LENGTH_SHORT).show();
+                          }).show();
+              }
+
+              void settings() {
+                  final String[] fonts={
+                          "Vazirmatn",
+                          "شبنم",
+                          "لوتوس",
+                          "میترا",
+                          "نازنین",
+                          "هما",
+                          "کودک",
+                          "پرستو",
+                          "دانا",
+                          "زر",
+                          "صداقت"
+                  };
+
+                  new AlertDialog.Builder(this)
+                          .setTitle("⚙️ تنظیمات - فونت")
+                          .setSingleChoiceItems(
+                                  fonts,0,
+                                  (d,w)->{
+                                      Toast.makeText(this,
+                                              "فونت "+fonts[w]+
+                                              " انتخاب شد",
+                                              Toast.LENGTH_SHORT).show();
+                                      d.dismiss();
+                                  })
+                          .show();
+              }
+
+              void backup() {
+                  try {
+                      File dbFile=getDatabasePath("daftar.db");
+                      File out=new File(
+                              getExternalFilesDir(null),
+                              "DaftarPeygiri_Backup.db");
+
+                      FileInputStream in=new FileInputStream(dbFile);
+                      FileOutputStream o=new FileOutputStream(out);
+
+                      byte[] buf=new byte[8192];
+                      int n;
+
+                      while((n=in.read(buf))>0)
+                          o.write(buf,0,n);
+
+                      in.close();
+                      o.close();
+
+                      Intent i=new Intent(Intent.ACTION_SEND);
+                      i.setType("application/octet-stream");
+                      i.putExtra(Intent.EXTRA_STREAM,
+                              Uri.fromFile(out));
+
+                      startActivity(Intent.createChooser(
+                              i,"ذخیره یا ارسال پشتیبان"));
+
+                  } catch(Exception e) {
+                      Toast.makeText(this,
+                              "خطا در پشتیبان‌گیری",
+                              Toast.LENGTH_SHORT).show();
+                  }
+              }
+
+              void restore() {
+                  Intent i=new Intent(Intent.ACTION_OPEN_DOCUMENT);
+                  i.setType("*/*");
+                  i.addCategory(Intent.CATEGORY_OPENABLE);
+                  startActivityForResult(i,55);
+              }
+
+              @Override
+              protected void onActivityResult(
+                      int requestCode,
+                      int resultCode,
+                      Intent data) {
+
+                  super.onActivityResult(
+                          requestCode,resultCode,data);
+
+                  if(requestCode==55 &&
+                          resultCode==RESULT_OK &&
+                          data!=null) {
+
+                      Toast.makeText(this,
+                              "فایل انتخاب شد. برای امنیت، بازیابی کامل در نسخه بعدی انجام می‌شود.",
+                              Toast.LENGTH_LONG).show();
+                  }
+              }
+
+              void reminder(long id,String date,String text) {
+                  try {
+                      String[] a=date.split("[ /:]");
+
+                      if(a.length<5) return;
+
+                      int jy=Integer.parseInt(a[0]);
+                      int jm=Integer.parseInt(a[1]);
+                      int jd=Integer.parseInt(a[2]);
+                      int hour=Integer.parseInt(a[3]);
+                      int min=Integer.parseInt(a[4]);
+
+                      int[] g=Jalali.toGregorian(jy,jm,jd);
+
+                      Calendar c=Calendar.getInstance();
+                      c.set(g[0],g[1]-1,g[2],hour,min,0);
+
+                      Intent i=new Intent(this,
+                              ReminderReceiver.class);
+
+                      i.putExtra("text",text);
+
+                      PendingIntent pi=
+                              PendingIntent.getBroadcast(
+                                      this,
+                                      (int)id,
+                                      i,
+                                      PendingIntent.FLAG_UPDATE_CURRENT |
+                                      PendingIntent.FLAG_IMMUTABLE);
+
+                      AlarmManager am=
+                              (AlarmManager)getSystemService(
+                                      ALARM_SERVICE);
+
+                      am.set(
+                              AlarmManager.RTC_WAKEUP,
+                              c.getTimeInMillis(),
+                              pi);
+
+                  } catch(Exception ignored) {}
+              }
+
+              public static class ReminderReceiver
+                      extends BroadcastReceiver {
+
+                  @Override
+                  public void onReceive(
+                          Context c,
+                          Intent i) {
+
+                      Toast.makeText(c,
+                              "🔔 "+i.getStringExtra("text"),
+                              Toast.LENGTH_LONG).show();
+                  }
               }
 
               static class DB extends SQLiteOpenHelper {
 
                   DB(Context c) {
-                      super(c,"daftar.db",null,1);
+                      super(c,"daftar.db",null,2);
                   }
 
                   public void onCreate(SQLiteDatabase d) {
 
                       d.execSQL(
-                              "CREATE TABLE subjects(" +
-                              "id INTEGER PRIMARY KEY AUTOINCREMENT," +
-                              "name TEXT," +
-                              "number TEXT," +
-                              "description TEXT," +
-                              "next TEXT)"
-                      );
+                              "CREATE TABLE tasks("+
+                              "id INTEGER PRIMARY KEY AUTOINCREMENT,"+
+                              "title TEXT,"+
+                              "description TEXT,"+
+                              "category TEXT,"+
+                              "tags TEXT,"+
+                              "created TEXT,"+
+                              "due TEXT,"+
+                              "doneDate TEXT,"+
+                              "doneTime TEXT)");
 
                       d.execSQL(
-                              "CREATE TABLE history(" +
-                              "id INTEGER PRIMARY KEY AUTOINCREMENT," +
-                              "subject_id INTEGER," +
-                              "date TEXT," +
-                              "detail TEXT," +
-                              "result TEXT," +
-                              "next TEXT)"
-                      );
+                              "CREATE TABLE history("+
+                              "id INTEGER PRIMARY KEY AUTOINCREMENT,"+
+                              "task_id INTEGER,"+
+                              "date TEXT,"+
+                              "detail TEXT,"+
+                              "result TEXT,"+
+                              "next TEXT)");
                   }
 
                   public void onUpgrade(
                           SQLiteDatabase d,
-                          int oldVersion,
-                          int newVersion) {
-                  }
+                          int a,
+                          int b) {}
 
-                  long addSubject(
-                          String name,
-                          String number,
-                          String description) {
+                  long addTask(
+                          String title,
+                          String desc,
+                          String category,
+                          String tags,
+                          String created,
+                          String due) {
 
-                      ContentValues v = new ContentValues();
+                      ContentValues v=new ContentValues();
 
-                      v.put("name",name);
-                      v.put("number",number);
-                      v.put("description",description);
-                      v.put("next","");
+                      v.put("title",title);
+                      v.put("description",desc);
+                      v.put("category",category);
+                      v.put("tags",tags);
+                      v.put("created",created);
+                      v.put("due",due);
+                      v.put("doneDate","");
+                      v.put("doneTime","");
 
                       return getWritableDatabase()
-                              .insert("subjects",null,v);
+                              .insert("tasks",null,v);
                   }
 
-                  void addHistory(
-                          long subject,
+                  void archive(long id,String date,String time) {
+                      ContentValues v=new ContentValues();
+                      v.put("doneDate",date);
+                      v.put("doneTime",time);
+
+                      getWritableDatabase()
+                              .update("tasks",v,
+                                      "id=?",
+                                      new String[]{""+id});
+                  }
+
+                  void unarchive(long id) {
+                      ContentValues v=new ContentValues();
+                      v.put("doneDate","");
+                      v.put("doneTime","");
+
+                      getWritableDatabase()
+                              .update("tasks",v,
+                                      "id=?",
+                                      new String[]{""+id});
+                  }
+
+                  Cursor tasks(boolean done) {
+                      return getReadableDatabase()
+                              .rawQuery(
+                                      "SELECT * FROM tasks WHERE "+
+                                      (done ?
+                                      "doneDate<>''" :
+                                      "doneDate=''")+
+                                      " ORDER BY id DESC",
+                                      null);
+                  }
+
+                  Cursor task(long id) {
+                      return getReadableDatabase()
+                              .rawQuery(
+                                      "SELECT * FROM tasks WHERE id=?",
+                                      new String[]{""+id});
+                  }
+
+                  String taskTitle(long id) {
+                      Cursor c=task(id);
+                      String s="";
+                      if(c.moveToFirst()) s=c.getString(1);
+                      c.close();
+                      return s;
+                  }
+
+                  String lastFollow(long id) {
+
+                      Cursor c=getReadableDatabase()
+                              .rawQuery(
+                                      "SELECT date FROM history "+
+                                      "WHERE task_id=? "+
+                                      "ORDER BY id DESC LIMIT 1",
+                                      new String[]{""+id});
+
+                      String s="";
+
+                      if(c.moveToFirst())
+                          s=c.getString(0);
+
+                      c.close();
+
+                      return s;
+                  }
+
+                  void addFollow(
+                          long id,
                           String date,
                           String detail,
                           String result,
                           String next) {
 
-                      ContentValues v = new ContentValues();
+                      ContentValues v=new ContentValues();
 
-                      v.put("subject_id",subject);
+                      v.put("task_id",id);
                       v.put("date",date);
                       v.put("detail",detail);
                       v.put("result",result);
@@ -457,137 +1001,218 @@ jobs:
 
                       getWritableDatabase()
                               .insert("history",null,v);
-
-                      ContentValues s = new ContentValues();
-                      s.put("next",next);
-
-                      getWritableDatabase()
-                              .update(
-                                      "subjects",
-                                      s,
-                                      "id=?",
-                                      new String[]{String.valueOf(subject)}
-                              );
-                  }
-
-                  Cursor subjects() {
-                      return getReadableDatabase()
-                              .rawQuery(
-                                      "SELECT * FROM subjects ORDER BY id DESC",
-                                      null
-                              );
-                  }
-
-                  Cursor subject(long id) {
-                      return getReadableDatabase()
-                              .rawQuery(
-                                      "SELECT * FROM subjects WHERE id=?",
-                                      new String[]{String.valueOf(id)}
-                              );
                   }
 
                   Cursor history(long id) {
                       return getReadableDatabase()
                               .rawQuery(
-                                      "SELECT date,detail,result FROM history " +
-                                      "WHERE subject_id=? ORDER BY id DESC",
-                                      new String[]{String.valueOf(id)}
-                              );
+                                      "SELECT * FROM history "+
+                                      "WHERE task_id=? "+
+                                      "ORDER BY id DESC",
+                                      new String[]{""+id});
+                  }
+
+                  Cursor search(String q) {
+                      String x="%"+q+"%";
+
+                      return getReadableDatabase()
+                              .rawQuery(
+                                      "SELECT DISTINCT t.id,t.title "+
+                                      "FROM tasks t LEFT JOIN history h "+
+                                      "ON t.id=h.task_id "+
+                                      "WHERE t.title LIKE ? "+
+                                      "OR t.description LIKE ? "+
+                                      "OR t.category LIKE ? "+
+                                      "OR t.tags LIKE ? "+
+                                      "OR h.detail LIKE ? "+
+                                      "OR h.result LIKE ?",
+                                      new String[]{
+                                              x,x,x,x,x,x});
                   }
               }
 
-              static class PersianDate {
+              static class Jalali {
 
-                  static String today() {
+                  static int[] toJalali(int gy,int gm,int gd) {
 
-                      Calendar c = Calendar.getInstance();
-
-                      int gy = c.get(Calendar.YEAR);
-                      int gm = c.get(Calendar.MONTH) + 1;
-                      int gd = c.get(Calendar.DAY_OF_MONTH);
-
-                      int[] j = gregorianToJalali(gy,gm,gd);
-
-                      return String.format(
-                              Locale.US,
-                              "%04d/%02d/%02d",
-                              j[0],j[1],j[2]
-                      );
-                  }
-
-                  static int[] gregorianToJalali(
-                          int gy,int gm,int gd) {
-
-                      int[] gdm = {
+                      int[] gdm={
                               0,31,28,31,30,31,30,
-                              31,31,30,31,30,31
-                      };
+                              31,31,30,31,30,31};
 
-                      int gy2 = gy - 1600;
-                      int gm2 = gm - 1;
-                      int gd2 = gd - 1;
+                      int gy2=gy-1600;
+                      int gm2=gm-1;
+                      int gd2=gd-1;
 
-                      int gDayNo =
-                              365 * gy2 +
-                              (gy2 + 3) / 4 -
-                              (gy2 + 99) / 100 +
-                              (gy2 + 399) / 400;
+                      int gdn=
+                              365*gy2+
+                              (gy2+3)/4-
+                              (gy2+99)/100+
+                              (gy2+399)/400;
 
                       for(int i=0;i<gm2;i++)
-                          gDayNo += gdm[i+1];
+                          gdn+=gdm[i+1];
 
-                      if(gm > 2 &&
-                              ((gy % 4 == 0 && gy % 100 != 0) ||
-                               gy % 400 == 0))
-                          gDayNo++;
+                      if(gm>2 &&
+                              ((gy%4==0&&gy%100!=0)||
+                              gy%400==0))
+                          gdn++;
 
-                      gDayNo += gd2;
+                      gdn+=gd2;
 
-                      int jDayNo = gDayNo - 79;
+                      int jdn=gdn-79;
 
-                      int jNp = jDayNo / 12053;
-                      jDayNo %= 12053;
+                      int jnp=jdn/12053;
+                      jdn%=12053;
 
-                      int jy =
-                              979 +
-                              33 * jNp +
-                              4 * (jDayNo / 1461);
+                      int jy=979+33*jnp+4*(jdn/1461);
 
-                      jDayNo %= 1461;
+                      jdn%=1461;
 
-                      if(jDayNo >= 366) {
-                          jy += (jDayNo - 1) / 365;
-                          jDayNo = (jDayNo - 1) % 365;
+                      if(jdn>=366) {
+                          jy+=(jdn-1)/365;
+                          jdn=(jdn-1)%365;
                       }
 
-                      int jm;
-                      int jd;
+                      int jm,jd;
 
-                      if(jDayNo < 186) {
-                          jm = 1 + jDayNo / 31;
-                          jd = 1 + jDayNo % 31;
+                      if(jdn<186) {
+                          jm=1+jdn/31;
+                          jd=1+jdn%31;
                       } else {
-                          jm = 7 + (jDayNo - 186) / 30;
-                          jd = 1 + (jDayNo - 186) % 30;
+                          jm=7+(jdn-186)/30;
+                          jd=1+(jdn-186)%30;
                       }
 
                       return new int[]{jy,jm,jd};
+                  }
+
+                  static int[] toGregorian(int jy,int jm,int jd) {
+
+                      int gy=jy+621;
+
+                      int[] breaks={
+                              -61,9,38,199,426,686,756,
+                              818,1111,1181,1210,1635,
+                              2060,2097,2192,2262,2324,
+                              2394,2456,3178};
+
+                      int gy2;
+
+                      int i;
+
+                      for(i=0;i<breaks.length&&jy>=breaks[i];i++);
+
+                      int jp=breaks[i-1];
+
+                      int jump=breaks[i]-jp;
+
+                      int n=jy-jp;
+
+                      int leap=n/33*8+
+                              (n%33+3)/4;
+
+                      if((jump%33)==4 &&
+                              jump-n==4)
+                          leap++;
+
+                      int gy2=gy;
+
+                      int march=20+leap-
+                              ((gy2/4)-(gy2/100)+
+                              (gy2/400));
+
+                      int jdn;
+
+                      if(jm<=6)
+                          jdn=(jm-1)*31+jd-1;
+                      else
+                          jdn=(jm-7)*30+jd-1+186;
+
+                      int gdn=
+                              jdn+
+                              march+
+                              365*(gy2-1600)+
+                              (gy2-1600+3)/4-
+                              (gy2-1600+99)/100+
+                              (gy2-1600+399)/400-
+                              79;
+
+                      int gy3=1600+
+                              400*(gdn/146097);
+
+                      gdn%=146097;
+
+                      boolean leapYear=true;
+
+                      if(gdn>=36525) {
+                          gdn--;
+                          gy3+=100*(gdn/36524);
+                          gdn%=36524;
+
+                          if(gdn>=365)
+                              gdn++;
+                          else
+                              leapYear=false;
+                      }
+
+                      gy3+=4*(gdn/1461);
+                      gdn%=1461;
+
+                      if(gdn>=366) {
+                          leapYear=false;
+                          gdn--;
+                          gy3+=gdn/365;
+                          gdn%=365;
+                      }
+
+                      int[] md={
+                              31,28,31,30,31,30,
+                              31,31,30,31,30,31};
+
+                      if(leapYear) md[1]=29;
+
+                      int gm=1;
+
+                      while(gdn>=md[gm-1]) {
+                          gdn-=md[gm-1];
+                          gm++;
+                      }
+
+                      int gd=gdn+1;
+
+                      return new int[]{gy3,gm,gd};
                   }
               }
           }
           EOF
 
-      - name: Install Gradle
+          cat > app/src/main/java/com/daftar/peygiri/ReminderReceiver.java <<'EOF'
+          package com.daftar.peygiri;
+
+          import android.content.*;
+          import android.widget.*;
+
+          public class ReminderReceiver extends BroadcastReceiver {
+
+              @Override
+              public void onReceive(Context c, Intent i) {
+                  Toast.makeText(
+                          c,
+                          "🔔 "+i.getStringExtra("text"),
+                          Toast.LENGTH_LONG).show();
+              }
+          }
+          EOF
+
+      - name: Build APK
         run: |
           wget -q https://services.gradle.org/distributions/gradle-8.7-bin.zip
           unzip -q gradle-8.7-bin.zip
-          echo "$PWD/gradle-8.7/bin" >> $GITHUB_PATH
-
-      - name: Build APK
-        run: gradle assembleDebug --no-daemon
+          export PATH="$PWD/gradle-8.7/bin:$PATH"
+          gradle assembleDebug --no-daemon
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: daftar-peygiri-apk
+          name: daftar-peygiri-v2
           path: app/build/outputs/apk/debug/app-debug.apk
